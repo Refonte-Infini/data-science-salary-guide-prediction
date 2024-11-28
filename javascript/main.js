@@ -2,7 +2,7 @@
 import { pipeline } from "@huggingface/transformers"; // Hugging Face Transformers for Node.js
 import fetch from "node-fetch"; // For fetching API data
 
-// API URLs (Replace with actual endpoints)
+// API URLs (Replace with actual endpoints to get full data)
 const SALARY_API_URL = "https://api.mockdatasalary.com/salaries";
 const DEMAND_API_URL = "https://api.mockjobdemand.com/demand";
 const GEOGRAPHIC_API_URL = "https://api.mockgeographic.com/factors";
@@ -10,8 +10,8 @@ const SKILLS_API_URL = "https://api.mockskills.com/premiums";
 
 // Utility Functions for Models
 
-// Compound Annual Growth Rate (CAGR)
-const calculateCAGR = (futureValue, presentValue, years) => {
+// CAGR Calculation
+const calculateCAGR = (presentValue, futureValue, years) => {
     return Math.pow(futureValue / presentValue, 1 / years) - 1;
 };
 
@@ -35,29 +35,13 @@ const adjustForDemandAndGeography = (
     return baseSalary * (1 + demandFactor + geographicFactor);
 };
 
-// Fetch Data from APIs
-const fetchData = async (url) => {
-    try {
-        const response = await fetch(url);
-        if (response.ok) {
-            return await response.json();
-        } else {
-            throw new Error(`Failed to fetch data from ${url}`);
-        }
-    } catch (error) {
-        console.error(error.message);
-        return null;
-    }
+// Initialize BERT Pipeline
+const initializeBERT = async () => {
+    return await pipeline("ner", "bert-base-cased");
 };
 
-// Initialize the BERT-based named entity recognition pipeline
-async function initializeBERT() {
-    const nerPipeline = await pipeline("ner", "Xenova/bert-base-cased");
-    return nerPipeline;
-}
-
-// Extract salary details using BERT
-async function extractSalaryDetails(nerPipeline, jobDescription) {
+// Use BERT to Extract Salary Details
+const extractSalaryDetails = async (nerPipeline, jobDescription) => {
     const nerResults = await nerPipeline(jobDescription);
     const extractedData = {
         Role: [],
@@ -66,12 +50,16 @@ async function extractSalaryDetails(nerPipeline, jobDescription) {
     };
 
     nerResults.forEach((entity) => {
-        const text = entity.word;
+        const word = entity.word;
         if (entity.entity.startsWith("B-")) {
-            if (entity.entity.includes("ROLE")) extractedData.Role.push(text);
+            if (entity.entity.includes("ROLE")) extractedData.Role.push(word);
             else if (entity.entity.includes("LEVEL"))
-                extractedData.Level.push(text);
-            else if (text.includes("$")) extractedData.SalaryRange = text;
+                extractedData.Level.push(word);
+            else if (word.includes("$")) {
+                extractedData.SalaryRange = extractedData.SalaryRange
+                    ? `${extractedData.SalaryRange}${word}`
+                    : word;
+            }
         }
     });
 
@@ -80,12 +68,30 @@ async function extractSalaryDetails(nerPipeline, jobDescription) {
         Level: extractedData.Level.join(" "),
         SalaryRange: extractedData.SalaryRange,
     };
-}
+};
 
-// Main function to integrate BERT and salary prediction models
-async function main() {
-    // Fetch data from APIs with fallback to mock data
-    const salaryData = (await fetchData(SALARY_API_URL)) || [
+// Fetch Data from APIs
+const fetchData = async (url, fallbackData) => {
+    try {
+        const response = await fetch(url);
+        if (response.ok) {
+            return await response.json();
+        } else {
+            console.error(
+                `Failed to fetch data from ${url}. Using fallback data.`
+            );
+            return fallbackData;
+        }
+    } catch (error) {
+        console.error(`Error fetching data from ${url}: ${error.message}`);
+        return fallbackData;
+    }
+};
+
+// Main function to integrate BERT, CAGR, and other models
+const main = async () => {
+    // Mock data for fallbacks
+    const salaryMock = [
         {
             Role: "Data Analyst",
             "Entry-Level 2024": 70000,
@@ -99,22 +105,21 @@ async function main() {
             "Senior-Level 2024": 150000,
         },
     ];
-
-    const demandData = (await fetchData(DEMAND_API_URL)) || [
-        { Role: "Data Analyst", DemandFactor: 0.1 },
-        { Role: "Data Scientist", DemandFactor: 0.12 },
+    const demandMock = [
+        { Role: "Data Analyst", "Demand Factor": 0.1 },
+        { Role: "Data Scientist", "Demand Factor": 0.12 },
     ];
-
-    const geographicData = (await fetchData(GEOGRAPHIC_API_URL)) || [
-        { Role: "Data Analyst", GeographicFactor: 0.05 },
-        { Role: "Data Scientist", GeographicFactor: 0.07 },
+    const geographicMock = [
+        { Role: "Data Analyst", "Geographic Factor": 0.05 },
+        { Role: "Data Scientist", "Geographic Factor": 0.07 },
     ];
+    const skillsMock = { Python: 0.05, SQL: 0.03, MachineLearning: 0.02 };
 
-    const skillFactors = (await fetchData(SKILLS_API_URL)) || {
-        Python: 0.05,
-        SQL: 0.03,
-        MachineLearning: 0.02,
-    };
+    // Fetch data from APIs or use fallback data
+    const salaryData = await fetchData(SALARY_API_URL, salaryMock);
+    const demandData = await fetchData(DEMAND_API_URL, demandMock);
+    const geographicData = await fetchData(GEOGRAPHIC_API_URL, geographicMock);
+    const skillsData = skillsMock;
 
     // Mock job descriptions
     const jobDescriptions = [
@@ -122,81 +127,97 @@ async function main() {
         "Hiring a senior Data Engineer with experience in cloud platforms. Salary up to $175,000.",
     ];
 
-    // Initialize the BERT pipeline
-    const nerPipeline = await initializeBERT();
+    const use_bert = false;
+    if (use_bert) {
+        // Initialize BERT pipeline
+        const nerPipeline = await initializeBERT();
 
-    // Process each job description with BERT
-    const bertResults = [];
-    for (const description of jobDescriptions) {
-        const result = await extractSalaryDetails(nerPipeline, description);
-        bertResults.push(result);
+        // Process each job description with BERT
+        const bertResults = [];
+        for (const description of jobDescriptions) {
+            const result = await extractSalaryDetails(nerPipeline, description);
+            bertResults.push(result);
+        }
+
+        console.log("BERT Extracted Data:");
+        console.table(bertResults);
     }
 
-    console.log("BERT Extracted Data:");
-    console.table(bertResults);
-
-    // Merge Data and Apply Models
-    const mergedData = salaryData.map((role) => {
-        const demandFactor =
-            demandData.find((d) => d.Role === role.Role)?.DemandFactor || 0;
-        const geographicFactor =
-            geographicData.find((g) => g.Role === role.Role)
-                ?.GeographicFactor || 0;
-        return {
-            ...role,
-            DemandFactor: demandFactor,
-            GeographicFactor: geographicFactor,
-        };
-    });
-
-    const inflationRate = 0.025; // 2.5% inflation rate
+    // Inflation rate
+    const inflationRate = 0.025; // 2.5% inflation
 
     // Calculate 2025 salaries
-    const results = mergedData.map((role) => {
-        // Apply inflation adjustment
+    const results = salaryData.map((roleData) => {
+        const role = roleData.Role;
+
+        const entrySalary2024 = roleData["Entry-Level 2024"];
+        const midSalary2024 = roleData["Mid-Level 2024"];
+        const seniorSalary2024 = roleData["Senior-Level 2024"];
+
+        const demandFactor =
+            demandData.find((d) => d.Role === role)?.["Demand Factor"] || 0;
+        const geographicFactor =
+            geographicData.find((g) => g.Role === role)?.[
+                "Geographic Factor"
+            ] || 0;
+
+        // Apply CAGR based on historical data
+        const entryCAGR = calculateCAGR(
+            entrySalary2024 * 0.95,
+            entrySalary2024,
+            1
+        ); // Assuming 5% increase historically
+        const midCAGR = calculateCAGR(midSalary2024 * 0.9, midSalary2024, 1); // Assuming 10% increase historically
+        const seniorCAGR = calculateCAGR(
+            seniorSalary2024 * 0.85,
+            seniorSalary2024,
+            1
+        ); // Assuming 15% increase historically
+
+        // Inflation-adjusted salaries
         const entryInflated = adjustForInflation(
-            role["Entry-Level 2024"],
-            inflationRate
+            entrySalary2024,
+            inflationRate + entryCAGR
         );
         const midInflated = adjustForInflation(
-            role["Mid-Level 2024"],
-            inflationRate
+            midSalary2024,
+            inflationRate + midCAGR
         );
         const seniorInflated = adjustForInflation(
-            role["Senior-Level 2024"],
-            inflationRate
+            seniorSalary2024,
+            inflationRate + seniorCAGR
         );
 
-        // Apply skills premium adjustment
+        // Skills premium adjustments
         const entryWithSkills = adjustForSkillsPremium(
             entryInflated,
-            skillFactors
+            skillsData
         );
-        const midWithSkills = adjustForSkillsPremium(midInflated, skillFactors);
+        const midWithSkills = adjustForSkillsPremium(midInflated, skillsData);
         const seniorWithSkills = adjustForSkillsPremium(
             seniorInflated,
-            skillFactors
+            skillsData
         );
 
-        // Apply demand and geographic adjustments
+        // Demand and geographic adjustments
         const entryFinal = adjustForDemandAndGeography(
             entryWithSkills,
-            role.DemandFactor,
-            role.GeographicFactor
+            demandFactor,
+            geographicFactor
         );
         const midFinal = adjustForDemandAndGeography(
             midWithSkills,
-            role.DemandFactor,
-            role.GeographicFactor
+            demandFactor,
+            geographicFactor
         );
         const seniorFinal = adjustForDemandAndGeography(
             seniorWithSkills,
-            role.DemandFactor,
-            role.GeographicFactor
+            demandFactor,
+            geographicFactor
         );
 
         return {
-            Role: role.Role,
+            Role: role,
             "Entry-Level 2025": entryFinal.toFixed(2),
             "Mid-Level 2025": midFinal.toFixed(2),
             "Senior-Level 2025": seniorFinal.toFixed(2),
@@ -206,7 +227,7 @@ async function main() {
     // Display Results
     console.log("Predicted Salaries for 2025:");
     console.table(results);
-}
+};
 
 // Run the main function
 main();
