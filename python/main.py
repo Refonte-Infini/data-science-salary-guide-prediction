@@ -2,7 +2,7 @@ import requests
 import pandas as pd
 from transformers import pipeline
 
-# API URLs (Replace with actual endpoints)
+# API URLs (Replace with actual endpoints to get full data)
 SALARY_API_URL = "https://api.mockdatasalary.com/salaries"
 DEMAND_API_URL = "https://api.mockjobdemand.com/demand"
 GEOGRAPHIC_API_URL = "https://api.mockgeographic.com/factors"
@@ -22,7 +22,7 @@ def fetch_data(api_url, fallback_data):
         return pd.DataFrame(fallback_data)
 
 # Models
-def calculate_cagr(fv, pv, n):
+def calculate_cagr(pv, fv, n):
     """Compound Annual Growth Rate (CAGR)"""
     return (fv / pv) ** (1 / n) - 1
 
@@ -39,13 +39,9 @@ def demand_geographic_adjustment(base_salary, demand_factor, geographic_factor):
     """Adjust salary for demand and geography"""
     return base_salary * (1 + demand_factor + geographic_factor)
 
-def weighted_regression(base_salary, experience, skills_premium, location_factor):
-    """Predict salary using regression"""
-    return base_salary + 10000 * experience + 20000 * skills_premium + 30000 * location_factor
-
 # Initialize the BERT pipeline
 def initialize_bert():
-    return pipeline("ner", model="google-bert/bert-base-cased")
+    return pipeline("ner", model="dbmdz/bert-large-cased-finetuned-conll03-english")
 
 def extract_salary_details(bert_pipeline, job_description):
     """Use BERT to extract role, level, and salary range from job descriptions"""
@@ -98,7 +94,7 @@ def main():
 
     use_bert = False
     if use_bert:
-         # Initialize BERT pipeline
+        # Initialize BERT pipeline
         bert_pipeline = initialize_bert()
 
         # Process job descriptions with BERT
@@ -118,9 +114,14 @@ def main():
     entry_2025, mid_2025, senior_2025 = [], [], []
 
     for _, row in merged_data.iterrows():
-        entry_inflated = inflation_adjustment(row["Entry-Level 2024"], inflation_rate)
-        mid_inflated = inflation_adjustment(row["Mid-Level 2024"], inflation_rate)
-        senior_inflated = inflation_adjustment(row["Senior-Level 2024"], inflation_rate)
+        # Apply CAGR to project salaries (assuming historical data for past years)
+        entry_cagr = calculate_cagr(row["Entry-Level 2024"] * 0.95, row["Entry-Level 2024"], 1)
+        mid_cagr = calculate_cagr(row["Mid-Level 2024"] * 0.9, row["Mid-Level 2024"], 1)
+        senior_cagr = calculate_cagr(row["Senior-Level 2024"] * 0.85, row["Senior-Level 2024"], 1)
+
+        entry_inflated = inflation_adjustment(row["Entry-Level 2024"], inflation_rate + entry_cagr)
+        mid_inflated = inflation_adjustment(row["Mid-Level 2024"], inflation_rate + mid_cagr)
+        senior_inflated = inflation_adjustment(row["Senior-Level 2024"], inflation_rate + senior_cagr)
 
         entry_skills = skills_premium_adjustment(entry_inflated, skills_data)
         mid_skills = skills_premium_adjustment(mid_inflated, skills_data)
